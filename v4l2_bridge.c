@@ -119,6 +119,13 @@ static void usage(char *name)
 
 	HELP(" -n\tnumber of streams\t<stream count>\n");
 	HELP(" -S\tstream config\t\t<in:out@expdev@fps:num_buf:w,h:fourcc>\n");
+	HELP(" \t\t\t\tin = input video device node\n");
+	HELP(" \t\t\t\tout = output video device node\n");
+	HELP(" \t\t\t\texpdev = device to export(i or o)\n");
+	HELP(" \t\t\t\tfps = fps using usleep(-1 for free run)\n");
+	HELP(" \t\t\t\tnum_buf = number of buffer\n");
+	HELP(" \t\t\t\tw,h = width,height\n");
+	HELP(" \t\t\t\tfourcc = pixel format fourcc\n");
 	HELP(" \t\t\t\t(ex, /dev/video0:/dev/video1@o@5:4:640,480:YUYV)\n");
 	HELP(" -h\tshow this help\n");
 #undef HELP
