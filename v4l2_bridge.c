@@ -58,6 +58,8 @@ struct config {
 	unsigned int fourcc;		/* fourcc */
 	struct v4l2_pix_format format;	/* v4l2 pixel format */
 	unsigned int num_buffers;	/* num of buffers */
+	int fps;			/* fps */
+	unsigned int frame_us;		/* us per frame(1 sec / fps) */
 };
 
 /* buffer */
@@ -115,10 +117,10 @@ static void usage(char *name)
 #define HELP(...) fprintf(stderr, __VA_ARGS__);
 	HELP("usage: %s [-nh]\n", name);
 
-	HELP("\t-n\tnumber of streams\t<stream count>\n");
-	HELP("\t-S\tstream config\t\t<in:out@exp_dev@num_buf:w,h:fourcc>\n");
-	HELP("\t\t(ex, /dev/video0:/dev/video1@o@4:1920,1080:YUYV)\n");
-	HELP("\t-h\tshow this help\n");
+	HELP(" -n\tnumber of streams\t<stream count>\n");
+	HELP(" -S\tstream config\t\t<in:out@expdev@fps:num_buf:w,h:fourcc>\n");
+	HELP(" \t\t\t\t(ex, /dev/video0:/dev/video1@o@5:4:640,480:YUYV)\n");
+	HELP(" -h\tshow this help\n");
 #undef HELP
 }
 
@@ -271,6 +273,7 @@ static void stream_dump_config(struct stream *s)
 	DUMP("width: %d\n", s->config.format.width);
 	DUMP("height: %d\n", s->config.format.height);
 	DUMP("buffer count:%d\n", s->config.num_buffers);
+	DUMP("fps:%d\n", s->config.fps);
 	fourcc[0] = (char)(s->config.fourcc);
 	fourcc[1] = (char)(s->config.fourcc >> 8);
 	fourcc[2] = (char)(s->config.fourcc >> 16);
@@ -292,7 +295,7 @@ static void stream_dump_config(struct stream *s)
 	} while(0);
 
 /* parse stream args */
-/* ex: in_dev:out_dev@device_to_exp(o/i)@num_buf:width,height:fourcc */
+/* ex: in_dev:out_dev@device_to_exp(o/i)@fps:num_buf:width,height:fourcc */
 static int stream_parse_args(struct stream *s, const char *arg)
 {
 	const char *startp;
@@ -327,6 +330,11 @@ static int stream_parse_args(struct stream *s, const char *arg)
 		ret = -1;
 		goto err_out;
 	}
+
+	/* fps */
+	startp = endp + 1;
+	NEXT_ARG(startp, endp, ':');
+	s->config.fps = strtoul(startp, &endp, 10);
 
 	/* num of buffers */
 	startp = endp + 1;
@@ -373,6 +381,10 @@ static void *stream_on(void *data)
 		{.fd = s->in.fd, .events = POLLIN},
 		{.fd = s->out.fd, .events = POLLOUT},
 	};
+	struct timeval now;
+	unsigned int curr = 0;
+	unsigned int prev = 0;
+	unsigned int delay = 0;
 	int res;
 
 	/* push cleanup handler */
@@ -384,7 +396,20 @@ static void *stream_on(void *data)
 
 	/* poll and pass buffers */
 	while ((res = poll(fds, 2, 5000)) > 0) {
+
 		if (fds[0].revents & POLLIN) {
+			/* sleep for specified fps if needed */
+			if (s->config.frame_us > 0) {
+				gettimeofday(&now, NULL);
+				curr = now.tv_sec * 1000000 + now.tv_usec;
+				delay = curr - prev;
+				if (delay < s->config.frame_us) {
+					usleep((s->config.frame_us - delay));
+				}
+				gettimeofday(&now, NULL);
+				prev = now.tv_sec * 1000000 + now.tv_usec;
+			}
+
 			b = device_dequeue_buffer(&s->in, s->buffers);
 			device_queue_buffer(&s->out, b);
 		}
@@ -423,6 +448,11 @@ static void stream_init(struct stream *s)
 		/* queue buffer to input */
 		device_queue_buffer(&s->in, &s->buffers[i]);
 	}
+
+	if (s->config.fps > 0)
+		s->config.frame_us = (10000000 / s->config.fps) / 10;
+	else
+		s->config.frame_us = -1;
 
 	return;
 }
