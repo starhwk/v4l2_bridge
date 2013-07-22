@@ -167,24 +167,6 @@ static struct buffer *device_dequeue_buffer(struct device *d, struct buffer *bs)
 	return &bs[vb.index];
 }
 
-/* turn off video device */
-static void device_off(struct device *d)
-{
-	int res;
-	res = ioctl(d->fd, VIDIOC_STREAMOFF, &d->buf_type);
-	ASSERT(res < 0, "STREAMOFF failed: %s\n", ERRSTR);
-	return;
-}
-
-/* turn on video device */
-static void device_on(struct device *d)
-{
-	int res;
-	res = ioctl(d->fd, VIDIOC_STREAMON, &d->buf_type);
-	ASSERT(res < 0, "STREAMON failed: %s\n", ERRSTR);
-	return;
-}
-
 /* prepare buffer */
 static void device_prepare_buffer(struct device *d, struct buffer *b)
 {
@@ -200,6 +182,24 @@ static void device_prepare_buffer(struct device *d, struct buffer *b)
 		b->dbuf_fd = eb.fd;
 	}
 
+	return;
+}
+
+/* turn off video device */
+static void device_off(struct device *d)
+{
+	int res;
+	res = ioctl(d->fd, VIDIOC_STREAMOFF, &d->buf_type);
+	ASSERT(res < 0, "STREAMOFF failed: %s\n", ERRSTR);
+	return;
+}
+
+/* turn on video device */
+static void device_on(struct device *d)
+{
+	int res;
+	res = ioctl(d->fd, VIDIOC_STREAMON, &d->buf_type);
+	ASSERT(res < 0, "STREAMON failed: %s\n", ERRSTR);
 	return;
 }
 
