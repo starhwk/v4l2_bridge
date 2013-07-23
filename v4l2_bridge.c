@@ -203,6 +203,12 @@ static void device_on(struct device *d)
 	return;
 }
 
+/* exit device */
+static void device_exit(struct device *d)
+{
+	close(d->fd);
+}
+
 /* initialize device */
 static void device_init(struct device *d, struct config *c, unsigned int type)
 {
@@ -433,6 +439,13 @@ static void *stream_on(void *data)
 	return NULL;
 }
 
+/* exit stream */
+static void stream_exit(struct stream *s)
+{
+	device_exit(&s->out);
+	device_exit(&s->in);
+}
+
 /* initialize stream */
 static void stream_init(struct stream *s)
 {
@@ -548,6 +561,7 @@ static void manager_exit(struct manager *m)
 	/* wait for threads to terminate */
 	for (i = 0; i < m->num_streams; i++) {
 		pthread_join(m->streams[i].thread, NULL);
+		stream_exit(&m->streams[i]);
 	}
 	return;
 }
