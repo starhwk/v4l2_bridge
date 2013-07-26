@@ -176,7 +176,8 @@ static void device_prepare_buffer(struct device *d, struct buffer *b)
 	/* export buffer */
 	if (d->export) {
 		memset(&eb, 0, sizeof(eb));
-		eb.type = d->buf_type;;
+		eb.type = d->buf_type;
+		eb.index = b->index;
 		res = ioctl(d->fd, VIDIOC_EXPBUF, &eb);
 		ASSERT(res < 0, "VIDIOC_EXPBUF failed: %s\n", ERRSTR);
 		b->dbuf_fd = eb.fd;
