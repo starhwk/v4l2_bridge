@@ -57,6 +57,7 @@ struct device {
 struct config {
 	unsigned int fourcc;		/* fourcc */
 	struct v4l2_pix_format format;	/* v4l2 pixel format */
+	bool updated;			/* flag if v4l2 format is fixed */
 	unsigned int num_buffers;	/* num of buffers */
 	int fps;			/* fps */
 	unsigned int frame_us;		/* us per frame(1 sec / fps) */
@@ -210,6 +211,75 @@ static void device_exit(struct device *d)
 	close(d->fd);
 }
 
+/* re-initialize device */
+static void _device_reinit(struct device *d, struct config *c, unsigned int type)
+{
+	struct v4l2_capability caps;
+	struct v4l2_format fmt;
+	struct v4l2_requestbuffers rqbufs;
+	int ret;
+
+	close(d->fd);
+	d->fd = open(d->devname, O_RDWR);
+	ASSERT(d->fd < 0, "failed to open %s: %s\n", d->devname, ERRSTR);
+
+	/* query caps */
+	memset(&caps, 0, sizeof caps);
+
+	ret = ioctl(d->fd, VIDIOC_QUERYCAP, &caps);
+	ASSERT(ret, "VIDIOC_QUERYCAP failed: %s\n", ERRSTR);
+
+	ASSERT(~caps.capabilities & type,
+		"video: output or capture is not supported(%d, %d)\n",
+		caps.capabilities, type);
+	d->type = type;
+	d->buf_type = (d->type == V4L2_CAP_VIDEO_CAPTURE) ?
+		V4L2_BUF_TYPE_VIDEO_CAPTURE : V4L2_BUF_TYPE_VIDEO_OUTPUT;
+	d->mem_type = d->export ? V4L2_MEMORY_MMAP : V4L2_MEMORY_DMABUF;
+
+	memset(&fmt, 0, sizeof fmt);
+	fmt.type = d->buf_type;
+
+	/* set format(g_fmt->s_fmt->g_fmt) */
+	ret = ioctl(d->fd, VIDIOC_G_FMT, &fmt);
+	ASSERT(ret < 0, "VIDIOC_G_FMT failed: %s\n", ERRSTR);
+	printf("G_FMT(start): width = %u, height = %u, 4cc = %.4s\n",
+		fmt.fmt.pix.width, fmt.fmt.pix.height,
+		(char*)&fmt.fmt.pix.pixelformat);
+
+	c->format.pixelformat = c->fourcc;
+	fmt.fmt.pix = c->format;
+
+	ret = ioctl(d->fd, VIDIOC_S_FMT, &fmt);
+	ASSERT(ret < 0, "VIDIOC_S_FMT failed: %s\n", ERRSTR);
+
+	ret = ioctl(d->fd, VIDIOC_G_FMT, &fmt);
+	ASSERT(ret < 0, "VIDIOC_G_FMT failed: %s\n", ERRSTR);
+	printf("G_FMT(final): width = %u, height = %u, 4cc = %.4s\n",
+		fmt.fmt.pix.width, fmt.fmt.pix.height,
+		(char*)&fmt.fmt.pix.pixelformat);
+
+	/* request buffers */
+	memset(&rqbufs, 0, sizeof(rqbufs));
+	rqbufs.count = c->num_buffers;
+	rqbufs.type = d->buf_type;
+	rqbufs.memory = d->mem_type;
+
+	ret = ioctl(d->fd, VIDIOC_REQBUFS, &rqbufs);
+	ASSERT(ret < 0, "VIDIOC_REQBUFS failed: %s\n", ERRSTR);
+	ASSERT(rqbufs.count < c->num_buffers, "video node allocated only "
+		"%u of %u buffers\n", rqbufs.count, c->num_buffers);
+
+	if ((fmt.fmt.pix.width != c->format.width) ||
+		(fmt.fmt.pix.height != c->format.height) ||
+		(fmt.fmt.pix.pixelformat != c->format.pixelformat))
+		c->updated = true;
+
+	c->format = fmt.fmt.pix;
+
+	return;
+}
+
 /* initialize device */
 static void device_init(struct device *d, struct config *c, unsigned int type)
 {
@@ -267,6 +337,11 @@ static void device_init(struct device *d, struct config *c, unsigned int type)
 	ASSERT(ret < 0, "VIDIOC_REQBUFS failed: %s\n", ERRSTR);
 	ASSERT(rqbufs.count < c->num_buffers, "video node allocated only "
 		"%u of %u buffers\n", rqbufs.count, c->num_buffers);
+
+	if ((fmt.fmt.pix.width != c->format.width) ||
+		(fmt.fmt.pix.height != c->format.height) ||
+		(fmt.fmt.pix.pixelformat != c->format.pixelformat))
+		c->updated = true;
 
 	c->format = fmt.fmt.pix;
 
@@ -455,7 +530,15 @@ static void stream_init(struct stream *s)
 
 	/* initialize devices */
 	device_init(&s->in, &s->config, V4L2_CAP_VIDEO_CAPTURE);
+	s->config.updated = false;
 	device_init(&s->out, &s->config, V4L2_CAP_VIDEO_OUTPUT);
+
+	/* negotiate format between pipelines */
+	while (s->config.updated) {
+		s->config.updated = false;
+		_device_reinit(&s->in, &s->config, V4L2_CAP_VIDEO_CAPTURE);
+		_device_reinit(&s->out, &s->config, V4L2_CAP_VIDEO_OUTPUT);
+	}
 
 	s->buffers = calloc(sizeof(*b), s->config.num_buffers);
 	for (i = 0; i < s->config.num_buffers; i++) {
